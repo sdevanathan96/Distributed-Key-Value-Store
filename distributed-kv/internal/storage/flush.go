@@ -15,7 +15,11 @@ func (e *Engine) triggerFlush() {
 	}
 	e.immutable = e.memTable
 	e.memTable = NewMemTable(e.config.MemTableSize)
-	go e.flushImmutable()
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		e.flushImmutable()
+	}()
 }
 
 func (e *Engine) flushImmutable() {
@@ -53,9 +57,20 @@ func (e *Engine) flushImmutable() {
 		}
 	}
 
-	//meta, err := writer.Finish()
 	_, err = writer.Finish()
 	if err != nil {
+		return
+	}
+
+	sst, err := lsm.OpenSSTable(path, 0)
+	if err != nil {
+		log.Printf("open sstable error: %v", err)
+		return
+	}
+
+	err = e.lsm.AddSSTable(sst, 0)
+	if err != nil {
+		log.Printf("add sstable error: %v", err)
 		return
 	}
 
@@ -64,6 +79,4 @@ func (e *Engine) flushImmutable() {
 	e.mu.Unlock()
 
 	log.Printf("Flushed %d entries to %s", len(entries), path)
-
-	// e.lsm.AddSSTable(path, meta, 0)
 }

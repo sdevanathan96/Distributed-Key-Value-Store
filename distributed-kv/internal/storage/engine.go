@@ -1,20 +1,21 @@
 package storage
 
 import (
+	"distributed-kv/internal/storage/lsm"
 	"fmt"
 	"log"
 	"sync"
-	"sync/atomic"
 )
 
 type Engine struct {
-	mu            sync.RWMutex
-	wal           *WAL
-	memTable      *MemTable
-	immutable     *MemTable
-	config        StorageConfig
-	closed        bool
-	nextSSTableID atomic.Uint64
+	mu        sync.RWMutex
+	wg        sync.WaitGroup
+	wal       *WAL
+	memTable  *MemTable
+	immutable *MemTable
+	config    StorageConfig
+	closed    bool
+	lsm       *lsm.LSMTree
 }
 
 func NewEngine(config StorageConfig) (*Engine, error) {
@@ -41,14 +42,18 @@ func NewEngine(config StorageConfig) (*Engine, error) {
 		}
 	}
 	log.Printf("Engine recovered %d entries from WAL", len(entries))
+	lsmTree, err := lsm.NewLSMTree(config.SSTableDir, config.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("create lsm: %w", err)
+	}
 	engine := &Engine{
 		config:    config,
 		wal:       wal,
 		memTable:  mem,
 		immutable: nil,
 		closed:    false,
+		lsm:       lsmTree,
 	}
-	engine.nextSSTableID.Store(0)
 	return engine, nil
 }
 
@@ -80,15 +85,31 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 	if e.closed {
 		return nil, ErrEngineClosed
 	}
-	val, found := e.memTable.Get(key)
+	val, found, tombstone := e.memTable.GetT(key)
 	if found {
+		if tombstone {
+			return nil, ErrKeyNotFound
+		}
 		return val, nil
 	}
 	if e.immutable != nil {
-		val, found = e.immutable.Get(key)
+		val, found, tombstone = e.immutable.GetT(key)
 		if found {
+			if tombstone {
+				return nil, ErrKeyNotFound
+			}
 			return val, nil
 		}
+	}
+	entry, found, err := e.lsm.Get(key)
+	if err != nil {
+		return nil, fmt.Errorf("lsm get: %w", err)
+	}
+	if found {
+		if entry.Tombstone {
+			return nil, ErrKeyNotFound
+		}
+		return entry.Value, nil
 	}
 	return nil, ErrKeyNotFound
 }
@@ -117,17 +138,20 @@ func (e *Engine) Delete(key []byte) error {
 
 func (e *Engine) Close() error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.closed {
+		e.mu.Unlock()
 		return nil
 	}
 	e.closed = true
-	err := e.wal.Close()
+	e.mu.Unlock()
+	e.wg.Wait()
+	err := e.lsm.Close()
+	if err != nil {
+		return fmt.Errorf("lsm close: %w", err)
+	}
+	err = e.wal.Close()
 	if err != nil {
 		return fmt.Errorf("close wal: %w", err)
-	}
-	if e.memTable.Len() > 0 {
-		e.triggerFlush()
 	}
 	return nil
 }
@@ -147,5 +171,10 @@ func (e *Engine) GetSnapshot() map[string][]byte {
 }
 
 func (e *Engine) allocateSSTableID() uint64 {
-	return e.nextSSTableID.Add(1)
+	return e.lsm.AllocateSSTableID()
+}
+
+func (e *Engine) WaitForBackground() {
+	e.wg.Wait()
+	e.lsm.WaitForBackground()
 }

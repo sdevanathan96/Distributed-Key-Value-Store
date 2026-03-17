@@ -3,6 +3,7 @@ module distributed-kv
 go 1.25.4
 
 require (
+	github.com/bits-and-blooms/bloom/v3 v3.6.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.7.0
 )
@@ -15,7 +16,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.27.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.141.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.48.1 // indirect
-	github.com/bits-and-blooms/bloom/v3 v3.6.0 // indirect
+	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
