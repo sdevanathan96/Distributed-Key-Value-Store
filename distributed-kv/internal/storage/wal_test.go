@@ -19,14 +19,13 @@ func TestWALAppendAndRecover(t *testing.T) {
 	wal, err := NewWAL(config)
 	require.NoError(t, err)
 
-	// Append 100 entries — mix of Put and Delete
 	for i := 0; i < 100; i++ {
 		entry := WALEntry{
 			Key:   []byte(fmt.Sprintf("key-%03d", i)),
 			Value: []byte(fmt.Sprintf("val-%03d", i)),
 			Type:  EntryPut,
 		}
-		// Every 5th entry is a delete
+
 		if i%5 == 0 {
 			entry.Type = EntryDelete
 			entry.Value = nil
@@ -39,7 +38,6 @@ func TestWALAppendAndRecover(t *testing.T) {
 	err = wal.Close()
 	require.NoError(t, err)
 
-	// Create new WAL with same directory — simulates restart
 	wal2, err := NewWAL(config)
 	require.NoError(t, err)
 	defer wal2.Close()
@@ -98,21 +96,17 @@ func TestWALCorruptionHandling(t *testing.T) {
 	err = wal.Close()
 	require.NoError(t, err)
 
-	// Find the WAL segment file and corrupt the tail
 	files, err := filepath.Glob(filepath.Join(config.WALDir, "wal-*.log"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 
-	// Open the last segment and append garbage
 	f, err := os.OpenFile(files[len(files)-1], os.O_WRONLY|os.O_APPEND, 0644)
 	require.NoError(t, err)
-	// Write a fake TotalLen header pointing to 1000 bytes, followed by garbage
-	// This simulates a crash mid-write: TotalLen was written but the payload wasn't
+
 	_, err = f.Write([]byte{0x00, 0x00, 0x03, 0xE8, 0xFF, 0xFF, 0xFF, 0xFF, 0xAB})
 	require.NoError(t, err)
 	f.Close()
 
-	// Recover should get exactly 50 entries — garbage is detected and skipped
 	wal2, err := NewWAL(config)
 	require.NoError(t, err)
 	defer wal2.Close()
@@ -121,7 +115,6 @@ func TestWALCorruptionHandling(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 50, len(entries))
 
-	// Verify the valid entries are intact
 	for i, entry := range entries {
 		expectedKey := []byte(fmt.Sprintf("key-%03d", i))
 		assert.True(t, bytes.Equal(expectedKey, entry.Key))
@@ -158,7 +151,6 @@ func TestWALConcurrentAppends(t *testing.T) {
 	err = wal.Close()
 	require.NoError(t, err)
 
-	// Recover and verify
 	wal2, err := NewWAL(config)
 	require.NoError(t, err)
 	defer wal2.Close()
@@ -167,7 +159,6 @@ func TestWALConcurrentAppends(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, goroutines*entriesPerGoroutine, len(entries))
 
-	// All indices should be unique and in range [1, 1000]
 	seen := make(map[uint64]bool)
 	for _, entry := range entries {
 		assert.False(t, seen[entry.Index], "duplicate index: %d", entry.Index)
@@ -185,7 +176,6 @@ func TestWALLargeValues(t *testing.T) {
 	wal, err := NewWAL(config)
 	require.NoError(t, err)
 
-	// Create a 1MB value with a recognizable pattern
 	bigVal := make([]byte, 1024*1024)
 	for i := range bigVal {
 		bigVal[i] = byte(i % 256)
@@ -201,7 +191,6 @@ func TestWALLargeValues(t *testing.T) {
 	err = wal.Close()
 	require.NoError(t, err)
 
-	// Recover and verify
 	wal2, err := NewWAL(config)
 	require.NoError(t, err)
 	defer wal2.Close()
@@ -222,7 +211,6 @@ func TestWALDeleteEntries(t *testing.T) {
 	wal, err := NewWAL(config)
 	require.NoError(t, err)
 
-	// Put("a", "1"), Put("b", "2"), Delete("a"), Put("c", "3")
 	wal.Append(WALEntry{Type: EntryPut, Key: []byte("a"), Value: []byte("1")})
 	wal.Append(WALEntry{Type: EntryPut, Key: []byte("b"), Value: []byte("2")})
 	wal.Append(WALEntry{Type: EntryDelete, Key: []byte("a"), Value: nil})

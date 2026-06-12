@@ -24,6 +24,8 @@ type Manifest struct {
 	data ManifestData
 }
 
+// NewManifest returns a Manifest for dir, loading existing state from disk if
+// present.
 func NewManifest(dir string) *Manifest {
 	newManifest := &Manifest{dir: dir, data: ManifestData{
 		NextSSTableID: 1,
@@ -33,6 +35,8 @@ func NewManifest(dir string) *Manifest {
 	return newManifest
 }
 
+// Load reads the manifest file into memory, resetting to empty state if the
+// file is absent or unreadable.
 func (m *Manifest) Load() error {
 	manifestPath := filepath.Join(m.dir, "manifest.json")
 	var statErr error = nil
@@ -63,6 +67,8 @@ func (m *Manifest) Load() error {
 	return nil
 }
 
+// Save writes the manifest to disk atomically via a temp file, fsync, and
+// rename.
 func (m *Manifest) Save() error {
 	manifestPath := filepath.Join(m.dir, "manifest.json")
 	tmpPath := filepath.Join(m.dir, "manifest.json.tmp")
@@ -96,6 +102,7 @@ func (m *Manifest) Save() error {
 	return nil
 }
 
+// AddSSTable records an SSTable at path and level and persists the manifest.
 func (m *Manifest) AddSSTable(path string, level int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -111,6 +118,7 @@ func (m *Manifest) AddSSTable(path string, level int) error {
 	return err
 }
 
+// RemoveSSTable drops the entry for path and persists the manifest.
 func (m *Manifest) RemoveSSTable(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -127,6 +135,8 @@ func (m *Manifest) RemoveSSTable(path string) error {
 	return nil
 }
 
+// GetNextSSTableID returns the next SSTable identifier and persists the
+// incremented counter.
 func (m *Manifest) GetNextSSTableID() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -139,6 +149,7 @@ func (m *Manifest) GetNextSSTableID() uint64 {
 	return current
 }
 
+// GetSSTables returns a copy of the recorded SSTable entries.
 func (m *Manifest) GetSSTables() []SSTableInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -24,6 +24,8 @@ type WAL struct {
 	closed          bool
 }
 
+// NewWAL opens the WAL for writing, creating a fresh segment numbered after the
+// highest existing one and loading the truncation watermark from the meta file.
 func NewWAL(config StorageConfig) (*WAL, error) {
 	err := os.MkdirAll(config.WALDir, 0755)
 	if err != nil {
@@ -91,6 +93,9 @@ func NewWAL(config StorageConfig) (*WAL, error) {
 	}, err
 }
 
+// Append writes entry to the active segment as a length prefixed, CRC32 checked
+// record, assigns it the next sequential index, optionally fsyncs, and rotates
+// the segment once it grows past the size limit.
 func (w *WAL) Append(entry WALEntry) (uint64, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -137,6 +142,9 @@ func (w *WAL) Append(entry WALEntry) (uint64, error) {
 	return entry.Index, nil
 }
 
+// Recover reads every segment in order and returns the entries above the
+// truncation watermark, stopping at the first torn or corrupt record so a
+// partial trailing write is discarded.
 func (w *WAL) Recover() ([]WALEntry, error) {
 	var maxEntryIndex uint64 = 0
 	entries := make([]WALEntry, 0)
@@ -193,6 +201,7 @@ func (w *WAL) Recover() ([]WALEntry, error) {
 	return entries, err
 }
 
+// decodePayload parses a WAL record payload into a WALEntry.
 func decodePayload(payload []byte) WALEntry {
 	entry := WALEntry{}
 	term := binary.BigEndian.Uint64(payload[0:8])
@@ -209,6 +218,9 @@ func decodePayload(payload []byte) WALEntry {
 	return entry
 }
 
+// Truncate records that entries up to and including afterIndex are obsolete by
+// persisting the watermark to the meta file, so Recover skips them. It does not
+// delete segment files.
 func (w *WAL) Truncate(afterIndex uint64) error {
 	filename := fmt.Sprintf("wal-meta.json")
 	path := filepath.Join(w.config.WALDir, filename)
@@ -238,6 +250,8 @@ func (w *WAL) Truncate(afterIndex uint64) error {
 	return err
 }
 
+// rotate syncs and closes the current segment and opens the next one for
+// appending. The caller must hold w.mu.
 func (w *WAL) rotate() error {
 	err := w.file.Sync()
 	if err != nil {
@@ -265,6 +279,7 @@ func (w *WAL) rotate() error {
 	return err
 }
 
+// Close marks the WAL closed and flushes and closes the active segment.
 func (w *WAL) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

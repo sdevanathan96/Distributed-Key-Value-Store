@@ -18,6 +18,8 @@ type Engine struct {
 	lsm       *lsm.LSMTree
 }
 
+// NewEngine opens the storage engine at the configured paths, replaying the WAL
+// into a fresh MemTable and opening the existing LSM tree.
 func NewEngine(config StorageConfig) (*Engine, error) {
 	err := config.EnsureDirs()
 	if err != nil {
@@ -57,6 +59,8 @@ func NewEngine(config StorageConfig) (*Engine, error) {
 	return engine, nil
 }
 
+// Put durably records key and value: it appends to the WAL, applies the write
+// to the MemTable, and triggers a background flush when the MemTable is full.
 func (e *Engine) Put(key, value []byte) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -79,6 +83,9 @@ func (e *Engine) Put(key, value []byte) error {
 	return nil
 }
 
+// Get returns the value for key, searching the active MemTable, the immutable
+// MemTable being flushed, and then the LSM tree in that order. A tombstone
+// encountered along the way yields ErrKeyNotFound.
 func (e *Engine) Get(key []byte) ([]byte, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -114,6 +121,8 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
+// Delete durably records a tombstone for key through the same WAL then MemTable
+// path as Put.
 func (e *Engine) Delete(key []byte) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -136,6 +145,8 @@ func (e *Engine) Delete(key []byte) error {
 	return nil
 }
 
+// Close marks the engine closed, waits for background flushes to finish, and
+// closes the LSM tree and WAL.
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	if e.closed {
@@ -156,6 +167,8 @@ func (e *Engine) Close() error {
 	return nil
 }
 
+// GetSnapshot returns the live, non tombstone contents of the active MemTable
+// as a map. It does not include data already flushed to SSTables.
 func (e *Engine) GetSnapshot() map[string][]byte {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -170,10 +183,14 @@ func (e *Engine) GetSnapshot() map[string][]byte {
 	return result
 }
 
+// allocateSSTableID returns the next unique SSTable identifier from the LSM
+// manifest.
 func (e *Engine) allocateSSTableID() uint64 {
 	return e.lsm.AllocateSSTableID()
 }
 
+// WaitForBackground blocks until all background flush and compaction goroutines
+// have finished. Intended for tests.
 func (e *Engine) WaitForBackground() {
 	e.wg.Wait()
 	e.lsm.WaitForBackground()

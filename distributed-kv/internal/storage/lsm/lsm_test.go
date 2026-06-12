@@ -10,10 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
 func writeSSTable(t *testing.T, dir string, id int, entries []Entry) string {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(dir, 0755))
@@ -45,10 +41,6 @@ func makeTombstone(key string, ts int64) Entry {
 		Timestamp: ts,
 	}
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// LEVEL TESTS
-// ═══════════════════════════════════════════════════════════════════════════
 
 func TestLevelL0NewestFirst(t *testing.T) {
 	dir := t.TempDir()
@@ -117,10 +109,6 @@ func TestLevelL1SortedNonOverlapping(t *testing.T) {
 	sst1.Close()
 	sst2.Close()
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// LSM TREE TESTS
-// ═══════════════════════════════════════════════════════════════════════════
 
 func TestLSMTreeGet(t *testing.T) {
 	dir := t.TempDir()
@@ -197,10 +185,6 @@ func TestLSMTombstoneStopsSearch(t *testing.T) {
 	assert.True(t, entry.Tombstone, "should return tombstone entry")
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MANIFEST TESTS
-// ═══════════════════════════════════════════════════════════════════════════
-
 func TestManifestPersistence(t *testing.T) {
 	dir := t.TempDir()
 
@@ -242,10 +226,6 @@ func TestManifestRemove(t *testing.T) {
 	assert.Equal(t, 2, len(m2.GetSSTables()))
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// ITERATOR TESTS
-// ═══════════════════════════════════════════════════════════════════════════
-
 func TestSSTableIterator(t *testing.T) {
 	dir := t.TempDir()
 	entries := []Entry{
@@ -279,7 +259,6 @@ func TestSSTableIterator(t *testing.T) {
 func TestMergeIteratorDeduplication(t *testing.T) {
 	dir := t.TempDir()
 
-	// SST-1 (older): a=old, c=v3, e=v5
 	path1 := writeSSTable(t, dir, 1, []Entry{
 		makeEntry("a", "old", 100),
 		makeEntry("c", "v3", 100),
@@ -289,7 +268,6 @@ func TestMergeIteratorDeduplication(t *testing.T) {
 	require.NoError(t, err)
 	defer sst1.Close()
 
-	// SST-2 (newer): a=new, b=v2, c=v3_updated
 	path2 := writeSSTable(t, dir, 2, []Entry{
 		makeEntry("a", "new", 200),
 		makeEntry("b", "v2", 200),
@@ -315,7 +293,6 @@ func TestMergeIteratorDeduplication(t *testing.T) {
 		results = append(results, entry)
 	}
 
-	// Unique keys: a, b, c, e = 4 (a and c are deduplicated)
 	require.Equal(t, 4, len(results))
 
 	assert.Equal(t, "a", string(results[0].Key))
@@ -372,10 +349,6 @@ func TestMergeIteratorWithTombstones(t *testing.T) {
 	assert.Equal(t, "b", string(results[1].Key))
 	assert.False(t, results[1].Tombstone)
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPACTION TESTS
-// ═══════════════════════════════════════════════════════════════════════════
 
 func TestCompactionBasic(t *testing.T) {
 	dir := t.TempDir()

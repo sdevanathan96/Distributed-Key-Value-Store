@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 )
 
+// triggerFlush rotates the active MemTable into the immutable slot and flushes
+// it to an SSTable in the background. It is a no op if a previous flush is still
+// running. The caller must hold e.mu.
 func (e *Engine) triggerFlush() {
 	if e.immutable != nil {
 		log.Printf("Flush skipped: previous flush still in progress")
@@ -22,6 +25,9 @@ func (e *Engine) triggerFlush() {
 	}()
 }
 
+// flushImmutable writes the immutable MemTable to a new L0 SSTable, registers
+// it with the LSM tree, and clears the immutable slot. It runs as its own
+// goroutine.
 func (e *Engine) flushImmutable() {
 	e.mu.RLock()
 	im := e.immutable

@@ -31,6 +31,8 @@ type LSMTree struct {
 	dir        string
 }
 
+// NewLSMTree builds an LSM tree, loading every SSTable listed in the manifest
+// into its level.
 func NewLSMTree(ssTableDir string, manifestDir string) (*LSMTree, error) {
 	manifest := NewManifest(manifestDir)
 	var levels [MaxLevels]*Level
@@ -51,6 +53,9 @@ func NewLSMTree(ssTableDir string, manifestDir string) (*LSMTree, error) {
 		dir:      ssTableDir,
 	}, nil
 }
+
+// Get searches the levels from L0 downward and returns the first entry found
+// for key, including a tombstone.
 func (l *LSMTree) Get(key []byte) (Entry, bool, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -65,6 +70,9 @@ func (l *LSMTree) Get(key []byte) (Entry, bool, error) {
 	}
 	return Entry{}, false, nil
 }
+
+// AddSSTable registers sst at the given level and records it in the manifest,
+// scheduling a background L0 compaction once L0 reaches its table threshold.
 func (l *LSMTree) AddSSTable(sst *SSTable, level int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -73,15 +81,19 @@ func (l *LSMTree) AddSSTable(sst *SSTable, level int) error {
 	if err != nil {
 		return fmt.Errorf("add sstable %v error: %v", sst.path, err)
 	}
-	if level == 0 && l.levels[0].SSTableCount() >= L0CompactionThreshold {
+	if level == 0 && l.levels[0].SSTableCount() >= L0CompactionThreshold && l.compacting.CompareAndSwap(false, true) {
 		l.wg.Add(1)
 		go func() {
 			defer l.wg.Done()
+			defer l.compacting.Store(false)
 			l.compact(0)
 		}()
 	}
 	return nil
 }
+
+// RemoveSSTable removes the table at path from the level, the manifest, and
+// disk.
 func (l *LSMTree) RemoveSSTable(path string, level int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -102,15 +114,20 @@ func (l *LSMTree) RemoveSSTable(path string, level int) error {
 	return nil
 }
 
+// AllocateSSTableID returns the next unique SSTable identifier.
 func (l *LSMTree) AllocateSSTableID() uint64 {
 	return l.manifest.GetNextSSTableID()
 }
+
+// GetLevel returns the level numbered num.
 func (l *LSMTree) GetLevel(num int) *Level {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.levels[num]
 }
 
+// Close waits for background compactions to finish and closes every open
+// SSTable.
 func (l *LSMTree) Close() error {
 	l.wg.Wait()
 	for _, level := range l.levels {
@@ -124,6 +141,7 @@ func (l *LSMTree) Close() error {
 	return nil
 }
 
+// WaitForBackground blocks until background compactions have finished.
 func (l *LSMTree) WaitForBackground() {
 	l.wg.Wait()
 }

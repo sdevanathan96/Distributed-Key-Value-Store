@@ -14,7 +14,7 @@ var (
 type EntryType uint8
 
 const (
-	EntryPut EntryType = iota + 1 // start at 1, not 0
+	EntryPut EntryType = iota + 1
 	EntryDelete
 )
 
@@ -25,6 +25,7 @@ type KVPair struct {
 	Timestamp int64
 }
 
+// Less orders KVPairs by key, providing the comparison the MemTable btree uses.
 func (kv KVPair) Less(than KVPair) bool {
 	cmp := bytes.Compare(kv.Key, than.Key)
 	return cmp < 0

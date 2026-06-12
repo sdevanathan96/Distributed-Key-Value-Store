@@ -1,0 +1,92 @@
+syntax = "proto3";
+package kv;
+option go_package = "distributed-kv/proto/kvpb";
+
+message PutRequest {
+    bytes key = 1;
+    bytes value = 2;
+}
+message PutResponse {
+    bool success = 1;
+}
+
+message GetRequest {
+    bytes key = 1;
+}
+message GetResponse {
+    bytes value = 1;
+    bool found = 2;
+}
+
+message DeleteRequest {
+    bytes key = 1;
+}
+message DeleteResponse {
+    bool success = 1;
+}
+
+message ClusterStatusRequest {}
+message ClusterStatusResponse {
+    string leader_id = 1;
+    repeated string nodes = 2;
+    uint64 term = 3;
+}
+
+service KVService {
+    rpc Put(PutRequest) returns (PutResponse);
+    rpc Get(GetRequest) returns (GetResponse);
+    rpc Delete(DeleteRequest) returns (DeleteResponse);
+    rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+}
+
+
+
+// ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+// ┃  CODE GENERATION                                                        ┃
+// ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+//
+// After creating the .proto files, generate Go code:
+//
+//   # From the project root:
+//protoc --go_out=. --go_opt=paths=source_relative \
+//      --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+//      proto/raft.proto
+//
+//   protoc --go_out=. --go_opt=paths=source_relative \
+//          --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+//          proto/kv.proto
+//
+// This generates:
+//   proto/raftpb/raft.pb.go         — message structs (VoteRequest, etc.)
+//   proto/raftpb/raft_grpc.pb.go    — gRPC client/server interfaces
+//   proto/kvpb/kv.pb.go
+//   proto/kvpb/kv_grpc.pb.go
+//
+// WHAT'S GENERATED:
+//
+// For messages:
+//   type VoteRequest struct {
+//       Term         uint64
+//       CandidateId  string
+//       LastLogIndex uint64
+//       LastLogTerm  uint64
+//   }
+//   // + Marshal/Unmarshal methods
+//
+// For services (server side):
+//   type RaftServiceServer interface {
+//       RequestVote(context.Context, *VoteRequest) (*VoteResponse, error)
+//       AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error)
+//       InstallSnapshot(context.Context, *InstallSnapshotRequest) (*InstallSnapshotResponse, error)
+//   }
+//   // You implement this interface.
+//
+// For services (client side):
+//   type RaftServiceClient interface {
+//       RequestVote(ctx, *VoteRequest, ...grpc.CallOption) (*VoteResponse, error)
+//       // ...
+//   }
+//   func NewRaftServiceClient(cc grpc.ClientConnInterface) RaftServiceClient
+//   // You call this to create a client that talks to a remote node.
+//
+// ═══════════════════════════════════════════════════════════════════════════

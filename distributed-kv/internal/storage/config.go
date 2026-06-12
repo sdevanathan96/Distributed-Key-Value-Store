@@ -15,6 +15,9 @@ type StorageConfig struct {
 	SyncWrites   bool
 }
 
+// DefaultConfig returns a StorageConfig rooted at dataDir with the standard
+// subdirectory layout, memtable and WAL size limits, and synchronous writes
+// enabled.
 func DefaultConfig(dataDir string) StorageConfig {
 	return StorageConfig{
 		DataDir:      dataDir,
@@ -26,6 +29,8 @@ func DefaultConfig(dataDir string) StorageConfig {
 	}
 }
 
+// EnsureDirs creates the data, WAL, and SSTable directories if they do not
+// already exist.
 func (c StorageConfig) EnsureDirs() error {
 	err := os.MkdirAll(c.DataDir, 0755)
 	if err != nil {

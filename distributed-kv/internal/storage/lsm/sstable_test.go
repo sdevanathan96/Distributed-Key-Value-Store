@@ -13,7 +13,6 @@ func TestSSTableWriteAndRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.sst")
 
-	// 1. Create 1000 sorted entries and write them
 	numEntries := 1000
 	writer, err := NewSSTableWriter(path, uint(numEntries))
 	require.NoError(t, err)
@@ -35,12 +34,10 @@ func TestSSTableWriteAndRead(t *testing.T) {
 	assert.Equal(t, []byte("key-000000"), meta.MinKey)
 	assert.Equal(t, []byte(fmt.Sprintf("key-%06d", numEntries-1)), meta.MaxKey)
 
-	// 2. Open and read back
 	sst, err := OpenSSTable(path, 0)
 	require.NoError(t, err)
 	defer sst.Close()
 
-	// 3. Verify every key is found with correct value
 	for i := 0; i < numEntries; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		expectedVal := []byte(fmt.Sprintf("value-%06d", i))
@@ -53,7 +50,6 @@ func TestSSTableWriteAndRead(t *testing.T) {
 		assert.Equal(t, int64(i), entry.Timestamp)
 	}
 
-	// 4. Verify non-existent keys return not found
 	missingKeys := []string{"aaa-missing", "key-999999", "zzz-missing"}
 	for _, k := range missingKeys {
 		_, found, err := sst.Get([]byte(k))
@@ -66,7 +62,6 @@ func TestSSTableBloomFilter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bloom_test.sst")
 
-	// 1. Write 10,000 entries with prefix "exists-"
 	numEntries := 10000
 	writer, err := NewSSTableWriter(path, uint(numEntries))
 	require.NoError(t, err)
@@ -83,25 +78,20 @@ func TestSSTableBloomFilter(t *testing.T) {
 	_, err = writer.Finish()
 	require.NoError(t, err)
 
-	// 2. Open SSTable
 	sst, err := OpenSSTable(path, 0)
 	require.NoError(t, err)
 	defer sst.Close()
 
-	// 3. Test 10,000 keys that DON'T exist (prefix "missing-")
-	//    Count false positives (bloom says maybe but key not found)
 	falsePositives := 0
 	numTests := 10000
 	for i := 0; i < numTests; i++ {
 		key := []byte(fmt.Sprintf("missing-%06d", i))
 
-		// Check bloom directly
 		if sst.bloom.MayContain(key) {
 			falsePositives++
 		}
 	}
 
-	// 4. Assert FP rate < 2% (target is 1%, allow margin)
 	fpRate := float64(falsePositives) / float64(numTests)
 	t.Logf("Bloom filter false positive rate: %.2f%% (%d / %d)", fpRate*100, falsePositives, numTests)
 	assert.Less(t, fpRate, 0.02, "false positive rate should be under 2%%")
@@ -114,7 +104,6 @@ func TestSSTableTombstones(t *testing.T) {
 	writer, err := NewSSTableWriter(path, 100)
 	require.NoError(t, err)
 
-	// Write a mix: even keys are regular, odd keys are tombstones
 	for i := 0; i < 100; i++ {
 		entry := Entry{
 			Key:       []byte(fmt.Sprintf("key-%06d", i)),
@@ -130,7 +119,6 @@ func TestSSTableTombstones(t *testing.T) {
 	_, err = writer.Finish()
 	require.NoError(t, err)
 
-	// Read back and verify tombstone flags
 	sst, err := OpenSSTable(path, 0)
 	require.NoError(t, err)
 	defer sst.Close()

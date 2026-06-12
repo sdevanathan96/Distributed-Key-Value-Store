@@ -10,6 +10,8 @@ type SSTableIterator struct {
 	valid   bool
 }
 
+// NewSSTableIterator returns an iterator positioned at the first entry of sst,
+// or an invalid iterator if the table holds no data entries.
 func NewSSTableIterator(sst *SSTable) (*SSTableIterator, error) {
 	var valid bool
 	var currentEntry = Entry{}
@@ -33,6 +35,8 @@ func NewSSTableIterator(sst *SSTable) (*SSTableIterator, error) {
 	}, err
 
 }
+
+// Next advances to the following entry and reports whether one was read.
 func (it *SSTableIterator) Next() bool {
 	if !it.valid {
 		return false
@@ -50,12 +54,17 @@ func (it *SSTableIterator) Next() bool {
 	it.offset += bytesRead
 	return true
 }
+
+// Entry returns the entry at the current position, or the zero Entry if the
+// iterator is exhausted.
 func (it *SSTableIterator) Entry() Entry {
 	if it.Valid() {
 		return it.current
 	}
 	return Entry{}
 }
+
+// Valid reports whether the iterator is positioned at a readable entry.
 func (it *SSTableIterator) Valid() bool {
 	return it.valid
 }
@@ -64,10 +73,14 @@ type MergeIterator struct {
 	iters []*SSTableIterator
 }
 
+// NewMergeIterator returns an iterator that merges the given per table
+// iterators into a single ascending key stream.
 func NewMergeIterator(iters []*SSTableIterator) *MergeIterator {
 	return &MergeIterator{iters}
 }
 
+// Next returns the next entry in merged key order, collapsing duplicate keys to
+// the newest version by timestamp. ok is false once all inputs are exhausted.
 func (m *MergeIterator) Next() (Entry, bool) {
 	var bestIdx = -1
 	var bestEntry Entry

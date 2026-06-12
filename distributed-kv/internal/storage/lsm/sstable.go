@@ -9,8 +9,6 @@ import (
 	"sync"
 )
 
-// ── CONSTANTS ─────────────────────────────────────────────────────────────
-
 const (
 	MagicNumber         uint32 = 0x53535401
 	SparseIndexInterval        = 16
@@ -60,7 +58,8 @@ type SSTableWriter struct {
 	maxKey     []byte
 }
 
-// YOUR CODE HERE: NewSSTableWriter function
+// NewSSTableWriter creates the file at path and returns a writer for streaming
+// up to estimatedEntries sorted entries into it.
 func NewSSTableWriter(path string, estimatedEntries uint) (*SSTableWriter, error) {
 	file, err := os.Create(path)
 	if err != nil {
@@ -79,6 +78,9 @@ func NewSSTableWriter(path string, estimatedEntries uint) (*SSTableWriter, error
 	}, nil
 }
 
+// WriteEntry appends one entry to the data block, updating the bloom filter,
+// the sparse index, and the min and max key bounds. Entries must be written in
+// ascending key order.
 func (w *SSTableWriter) WriteEntry(entry Entry) error {
 	entryOffset := w.offset
 	size := 2 + len(entry.Key) + 4 + len(entry.Value) + 1 + 8
@@ -120,6 +122,8 @@ func (w *SSTableWriter) WriteEntry(entry Entry) error {
 	return nil
 }
 
+// Finish writes the sparse index, bloom filter, and footer, fsyncs and closes
+// the file, and returns the metadata describing the completed SSTable.
 func (w *SSTableWriter) Finish() (*SSTableMeta, error) {
 	indexOffset := w.offset
 	for _, indexEntry := range w.index {
@@ -198,6 +202,7 @@ func (w *SSTableWriter) Finish() (*SSTableMeta, error) {
 	}, nil
 }
 
+// copyBytes returns an independent copy of src, or nil if src is nil.
 func copyBytes(src []byte) []byte {
 	if src == nil {
 		return nil
@@ -207,6 +212,8 @@ func copyBytes(src []byte) []byte {
 	return dst
 }
 
+// OpenSSTable opens the SSTable at path, validating the footer magic and
+// loading the sparse index and bloom filter into memory for reads.
 func OpenSSTable(path string, level int) (*SSTable, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -301,6 +308,9 @@ func OpenSSTable(path string, level int) (*SSTable, error) {
 	}, nil
 }
 
+// Get returns the entry for key, or found false if absent. It short circuits
+// using the key range bounds and the bloom filter, then binary searches the
+// sparse index and scans the one data block that may hold the key.
 func (s *SSTable) Get(key []byte) (Entry, bool, error) {
 	if bytes.Compare(key, s.meta.MinKey) < 0 {
 		return Entry{}, false, nil
@@ -359,10 +369,13 @@ func (s *SSTable) Get(key []byte) (Entry, bool, error) {
 	return Entry{}, false, nil
 }
 
+// Close closes the underlying file.
 func (s *SSTable) Close() error {
 	return s.file.Close()
 }
 
+// readEntryAt reads the entry at byte offset and returns it along with the
+// number of bytes the entry occupies, used to walk the data block sequentially.
 func (s *SSTable) readEntryAt(offset int64) (Entry, int64, error) {
 	hdr := make([]byte, 2)
 	_, err := s.file.ReadAt(hdr, offset)

@@ -8,12 +8,11 @@ import (
 	"path/filepath"
 )
 
+// compact merges every SSTable in sourceLevel with the overlapping tables in
+// the next level into a single new table, then removes the inputs. Only one
+// compaction runs at a time; concurrent calls return immediately. It runs as
+// its own goroutine.
 func (l *LSMTree) compact(sourceLevel int) {
-	if !l.compacting.CompareAndSwap(false, true) {
-		return
-	}
-	defer l.compacting.Store(false)
-
 	targetLevel := sourceLevel + 1
 	if targetLevel >= MaxLevels {
 		log.Printf("Cannot compact: target level %d exceeds max", targetLevel)
@@ -44,7 +43,6 @@ func (l *LSMTree) compact(sourceLevel int) {
 
 	l.mu.Lock()
 	targetSSTables := l.levels[targetLevel].SSTables()
-	log.Printf("DEBUG compact: L%d has %d SSTables at snapshot time", targetLevel, len(targetSSTables))
 	var overlapping []*SSTable
 	for _, sst := range targetSSTables {
 		if bytes.Compare(sst.meta.MinKey, globalMax) <= 0 &&
@@ -52,15 +50,6 @@ func (l *LSMTree) compact(sourceLevel int) {
 			overlapping = append(overlapping, sst)
 		}
 	}
-	log.Printf("DEBUG compact: source globalMin=%s globalMax=%s", string(globalMin), string(globalMax))
-	for _, sst := range targetSSTables {
-		log.Printf("DEBUG compact: L%d SSTable %s [%s .. %s]",
-			targetLevel, sst.path, string(sst.meta.MinKey), string(sst.meta.MaxKey))
-		log.Printf("DEBUG compact: overlap check: MinKey<=globalMax? %v  MaxKey>=globalMin? %v",
-			bytes.Compare(sst.meta.MinKey, globalMax) <= 0,
-			bytes.Compare(sst.meta.MaxKey, globalMin) >= 0)
-	}
-	log.Printf("DEBUG compact: found %d overlapping", len(overlapping))
 	l.mu.Unlock()
 
 	for _, sst := range overlapping {
@@ -138,6 +127,8 @@ func (l *LSMTree) compact(sourceLevel int) {
 		len(sourceSSTables), sourceLevel, len(overlapping), targetLevel, targetLevel, count)
 }
 
+// computeKeyRange returns the minimum and maximum keys spanning the given
+// tables.
 func computeKeyRange(sstables []*SSTable) ([]byte, []byte) {
 	if len(sstables) == 0 {
 		return nil, nil
