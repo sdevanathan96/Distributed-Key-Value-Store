@@ -149,13 +149,17 @@ func TestSingleNodeElection(t *testing.T) {
 	node.Start()
 	defer node.Stop()
 
-	time.Sleep(500 * time.Millisecond)
+	eventually(t, 2*time.Second, func() bool {
+		node.mu.RLock()
+		defer node.mu.RUnlock()
+		return node.state == Leader
+	})
 
 	node.mu.RLock()
-	assert.Equal(t, Leader, node.state, "single node should be leader")
+	defer node.mu.RUnlock()
 	assert.Equal(t, uint64(1), node.currentTerm, "should be in term 1")
 	assert.Equal(t, "node-0", node.leaderId)
-	node.mu.RUnlock()
+
 }
 
 func TestThreeNodeElection(t *testing.T) {
@@ -203,17 +207,14 @@ func TestLeaderHeartbeatPreventsElection(t *testing.T) {
 	initialTerm := nodes[leaderIdx].currentTerm
 	nodes[leaderIdx].mu.RUnlock()
 
-	time.Sleep(2 * time.Second)
-
-	currentLeader := getLeader(nodes)
-	assert.Equal(t, leaderIdx, currentLeader, "leader should not have changed")
-
-	nodes[leaderIdx].mu.RLock()
-	currentTerm := nodes[leaderIdx].currentTerm
-	nodes[leaderIdx].mu.RUnlock()
-	assert.Equal(t, initialTerm, currentTerm, "term should not have changed")
-
-	assert.Equal(t, 1, countState(nodes, Leader))
+	consistently(t, 2*time.Second, func() bool {
+		if getLeader(nodes) != leaderIdx {
+			return false
+		}
+		nodes[leaderIdx].mu.RLock()
+		defer nodes[leaderIdx].mu.RUnlock()
+		return nodes[leaderIdx].currentTerm == initialTerm
+	})
 }
 
 func TestReElectionAfterLeaderStop(t *testing.T) {
@@ -231,19 +232,7 @@ func TestReElectionAfterLeaderStop(t *testing.T) {
 	nodes[leaderIdx] = nil
 	t.Logf("Stopped leader node-%d", leaderIdx)
 
-	time.Sleep(2 * time.Second)
-
-	newLeaderIdx := -1
-	for i, node := range nodes {
-		if node == nil {
-			continue
-		}
-		node.mu.RLock()
-		if node.state == Leader {
-			newLeaderIdx = i
-		}
-		node.mu.RUnlock()
-	}
+	newLeaderIdx := waitForLeader(t, nodes, 3*time.Second)
 
 	require.NotEqual(t, -1, newLeaderIdx, "a new leader should be elected")
 	assert.NotEqual(t, leaderIdx, newLeaderIdx, "new leader should be different node")
@@ -266,21 +255,9 @@ func TestReElectionFiveNodes(t *testing.T) {
 	nodes[leaderIdx].Stop()
 	nodes[leaderIdx] = nil
 
-	time.Sleep(2 * time.Second)
-
-	newLeaderCount := 0
-	for _, node := range nodes {
-		if node == nil {
-			continue
-		}
-		node.mu.RLock()
-		if node.state == Leader {
-			newLeaderCount++
-		}
-		node.mu.RUnlock()
-	}
-
-	assert.Equal(t, 1, newLeaderCount, "should have exactly 1 new leader")
+	eventually(t, 2*time.Second, func() bool {
+		return countState(nodes, Leader) == 1
+	})
 }
 
 func TestFollowerRedirectsToLeader(t *testing.T) {
@@ -297,11 +274,14 @@ func TestFollowerRedirectsToLeader(t *testing.T) {
 		if i == leaderIdx {
 			continue
 		}
-		node.mu.RLock()
-		assert.Equal(t, leaderID, node.leaderId,
-			"node-%d should know the leader is %s", i, leaderID)
-		node.mu.RUnlock()
+		_, node := i, node
+		eventually(t, 2*time.Second, func() bool {
+			node.mu.RLock()
+			defer node.mu.RUnlock()
+			return node.leaderId == leaderID
+		})
 	}
+
 }
 
 func TestNoElectionWhileLeaderAlive(t *testing.T) {
@@ -311,16 +291,17 @@ func TestNoElectionWhileLeaderAlive(t *testing.T) {
 	waitForLeader(t, nodes, 3*time.Second)
 
 	terms1 := getTerms(nodes)
-
-	time.Sleep(3 * time.Second)
-
-	terms2 := getTerms(nodes)
-	for i := range nodes {
-		assert.Equal(t, terms1[i], terms2[i],
-			"node-%d term should not change while leader is alive", i)
-	}
-
+	consistently(t, 3*time.Second, func() bool {
+		terms2 := getTerms(nodes)
+		for i := range nodes {
+			if terms2[i] != terms1[i] {
+				return false
+			}
+		}
+		return true
+	})
 	assert.Equal(t, 1, countState(nodes, Leader))
+
 }
 
 func TestMultipleLeaderStops(t *testing.T) {

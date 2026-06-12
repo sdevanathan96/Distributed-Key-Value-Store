@@ -262,12 +262,15 @@ func TestCommitRequiresMajority(t *testing.T) {
 	idx, _, err := nodes[leaderIdx].Propose([]byte("no-quorum"))
 	require.NoError(t, err)
 
-	time.Sleep(500 * time.Millisecond)
-
 	nodes[leaderIdx].mu.RLock()
-	ci := nodes[leaderIdx].commitIndex
+	assert.Equal(t, idx, uint64(len(nodes[leaderIdx].log)-1), "entry should be in leader log")
 	nodes[leaderIdx].mu.RUnlock()
 
-	assert.Less(t, ci, idx, "isolated leader should not commit without majority")
-	assert.Equal(t, idx, uint64(len(nodes[leaderIdx].log)-1), "entry should be in leader log")
+	consistently(t, 500*time.Millisecond, func() bool {
+		n := nodes[leaderIdx]
+		n.mu.RLock()
+		defer n.mu.RUnlock()
+		return n.commitIndex < idx
+	})
+
 }
