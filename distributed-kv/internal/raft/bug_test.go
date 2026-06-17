@@ -62,8 +62,7 @@ func TestStopIsIdempotent(t *testing.T) {
 		HeartbeatInterval:  50 * time.Millisecond,
 		DataDir:            t.TempDir(),
 	}
-	applyCh := make(chan ApplyMsg, 100)
-	node, err := NewRaftNode(config, applyCh)
+	node, err := NewRaftNode(config)
 	require.NoError(t, err)
 	addr := freePort(t)
 	require.NoError(t, node.StartGRPCServer(addr))

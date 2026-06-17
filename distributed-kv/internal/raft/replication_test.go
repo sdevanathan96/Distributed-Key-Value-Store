@@ -54,8 +54,7 @@ func startFromConfigs(t *testing.T, configs []RaftConfig, addresses []string) []
 	t.Helper()
 	nodes := make([]*RaftNode, len(configs))
 	for i := range configs {
-		applyCh := make(chan ApplyMsg, 100)
-		node, err := NewRaftNode(configs[i], applyCh)
+		node, err := NewRaftNode(configs[i])
 		require.NoError(t, err)
 		require.NoError(t, node.StartGRPCServer(addresses[i]))
 		nodes[i] = node
@@ -92,7 +91,7 @@ func TestProposeOnFollowerFails(t *testing.T) {
 
 	_, _, err := nodes[followerIdx].Propose([]byte("cmd"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not the leader")
+	assert.Contains(t, err.Error(), "not leader")
 }
 
 func TestLogReplication(t *testing.T) {
@@ -164,8 +163,7 @@ func TestLogConsistencyAfterPartition(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	for _, i := range stoppedIdxs {
-		applyCh := make(chan ApplyMsg, 100)
-		node, err := NewRaftNode(configs[i], applyCh)
+		node, err := NewRaftNode(configs[i])
 		require.NoError(t, err)
 		require.NoError(t, node.StartGRPCServer(addresses[i]))
 		node.Start()
@@ -234,8 +232,7 @@ func TestFollowerCatchUp(t *testing.T) {
 	}
 	time.Sleep(300 * time.Millisecond)
 
-	applyCh := make(chan ApplyMsg, 100)
-	rejoined, err := NewRaftNode(configs[slowIdx], applyCh)
+	rejoined, err := NewRaftNode(configs[slowIdx])
 	require.NoError(t, err)
 	require.NoError(t, rejoined.StartGRPCServer(addresses[slowIdx]))
 	rejoined.Start()

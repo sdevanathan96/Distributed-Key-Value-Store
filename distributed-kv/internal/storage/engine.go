@@ -16,6 +16,9 @@ type Engine struct {
 	config    StorageConfig
 	closed    bool
 	lsm       *lsm.LSMTree
+	waiters   map[string]chan error
+	waitersMu sync.Mutex
+	stopApply chan struct{}
 }
 
 // NewEngine opens the storage engine at the configured paths, replaying the WAL
@@ -55,6 +58,8 @@ func NewEngine(config StorageConfig) (*Engine, error) {
 		immutable: nil,
 		closed:    false,
 		lsm:       lsmTree,
+		waiters:   make(map[string]chan error),
+    	stopApply: make(chan struct{}),
 	}
 	return engine, nil
 }

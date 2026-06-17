@@ -2,15 +2,21 @@ package raft
 
 import (
 	"distributed-kv/proto/raftpb"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+const applyChBuffer = 256
+
+var ErrNotLeader = errors.New("not leader")
 
 type RaftNode struct {
 	currentTerm   uint64
@@ -37,10 +43,34 @@ type RaftNode struct {
 	peerConns     []*grpc.ClientConn
 }
 
+type Status struct {
+	NodeID   string
+	LeaderID string
+	Term     uint64
+	Nodes    []string
+}
+
+func (rn *RaftNode) Status() Status {
+	rn.mu.RLock()
+	defer rn.mu.RUnlock()
+
+	nodes := make([]string, 0, len(rn.config.Peers)+1)
+	nodes = append(nodes, rn.id)
+	for peerID := range rn.config.Peers {
+		nodes = append(nodes, peerID)
+	}
+	return Status{
+		NodeID:   rn.id,
+		LeaderID: rn.leaderId,
+		Term:     rn.currentTerm,
+		Nodes:    nodes,
+	}
+}
+
 // NewRaftNode constructs a follower RaftNode from config, restoring any
 // persisted term, vote, and log from DataDir. Committed commands are delivered
 // in order on applyCh. It starts no goroutines; call Start for that.
-func NewRaftNode(config RaftConfig, applyCh chan ApplyMsg) (*RaftNode, error) {
+func NewRaftNode(config RaftConfig) (*RaftNode, error) {
 	var node = new(RaftNode)
 	node.currentTerm = 0
 	node.votedFor = ""
@@ -54,7 +84,7 @@ func NewRaftNode(config RaftConfig, applyCh chan ApplyMsg) (*RaftNode, error) {
 	node.id = config.NodeID
 	node.config = config
 	node.leaderId = ""
-	node.applyCh = applyCh
+	node.applyCh = make(chan ApplyMsg, applyChBuffer) // raft owns it now
 	node.stopCh = make(chan struct{})
 	node.applyDone = make(chan struct{})
 	node.fatalCh = make(chan error, 1)
@@ -64,8 +94,31 @@ func NewRaftNode(config RaftConfig, applyCh chan ApplyMsg) (*RaftNode, error) {
 		time.Duration(rand.Int63n(int64(config.ElectionTimeoutMax-config.ElectionTimeoutMin)))
 	node.electionTimer = time.NewTimer(timeout)
 	node.grpcServer = nil
+	if err := os.MkdirAll(config.DataDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create raft data dir %q: %w", config.DataDir, err)
+	}
 	node.loadPersisted()
 	return node, nil
+}
+
+func (rn *RaftNode) IsLeader() bool {
+	rn.mu.RLock()
+	defer rn.mu.RUnlock()
+	return rn.state == Leader
+}
+
+func (rn *RaftNode) LeaderHint() (addr string, known bool) {
+	rn.mu.RLock()
+	leaderID := rn.leaderId
+	rn.mu.RUnlock()
+	if leaderID == "" {
+		return "", false
+	}
+	addr, ok := rn.config.Peers[leaderID]
+	if !ok {
+		return "", false
+	}
+	return addr, true
 }
 
 // Start dials every peer, arms the election timer, and launches the main run
@@ -183,7 +236,7 @@ func (rn *RaftNode) Propose(command []byte) (uint64, uint64, error) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 	if rn.state != Leader {
-		return 0, 0, fmt.Errorf("not the leader, leader is %s", rn.leaderId)
+		return 0, 0, ErrNotLeader
 	}
 	lastIndex, _ := rn.getLastLogInfo()
 	entry := LogEntry{
@@ -196,6 +249,7 @@ func (rn *RaftNode) Propose(command []byte) (uint64, uint64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	rn.advanceCommitIndex()
 	go rn.triggerReplication()
 	return entry.Index, entry.Term, nil
 

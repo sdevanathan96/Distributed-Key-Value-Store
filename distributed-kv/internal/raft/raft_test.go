@@ -52,8 +52,7 @@ func startCluster(t *testing.T, n int) ([]*RaftNode, []string) {
 	nodes := make([]*RaftNode, n)
 
 	for i := 0; i < n; i++ {
-		applyCh := make(chan ApplyMsg, 100)
-		node, err := NewRaftNode(configs[i], applyCh)
+		node, err := NewRaftNode(configs[i])
 		require.NoError(t, err)
 		err = node.StartGRPCServer(addresses[i])
 		require.NoError(t, err)
@@ -140,8 +139,7 @@ func TestSingleNodeElection(t *testing.T) {
 		DataDir:            t.TempDir(),
 	}
 
-	applyCh := make(chan ApplyMsg, 100)
-	node, err := NewRaftNode(config, applyCh)
+	node, err := NewRaftNode(config)
 	require.NoError(t, err)
 
 	addr := freePort(t)
@@ -329,4 +327,36 @@ func TestMultipleLeaderStops(t *testing.T) {
 	}
 
 	assert.Equal(t, 1, newLeaderCount, "should still have a leader with 3 of 5 nodes")
+}
+
+func TestSingleNodeProposeApplies(t *testing.T) {
+	cfg := RaftConfig{
+		NodeID:             "node-0",
+		Peers:              map[string]string{}, // single node: no peers
+		ElectionTimeoutMin: 150 * time.Millisecond,
+		ElectionTimeoutMax: 300 * time.Millisecond,
+		HeartbeatInterval:  50 * time.Millisecond,
+		DataDir:            t.TempDir(),
+	}
+	rn, err := NewRaftNode(cfg)
+	require.NoError(t, err)
+	rn.Start()
+	defer rn.Stop()
+
+	eventually(t, 2*time.Second, func() bool { return rn.IsLeader() })
+
+	cmd := []byte("hello")
+	index, term, err := rn.Propose(cmd)
+	require.NoError(t, err)
+
+	select {
+	case msg := <-rn.ApplyCh():
+		assert.True(t, msg.CommandValid, "should be valid command")
+		assert.Equal(t, cmd, msg.Command, "command should match proposed")
+		assert.Equal(t, index, msg.CommandIndex, "command index should match proposed")
+		assert.Equal(t, term, msg.CommandTerm, "command term should match proposed")
+	case <-time.After(2 * time.Second):
+		t.Fatal("proposed entry never applied: commit did not advance on a single node")
+	}
+	_ = term
 }

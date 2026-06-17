@@ -40,3 +40,10 @@ func (rn *RaftNode) applyLoop() {
 		}
 	}
 }
+
+// ApplyCh returns the read side of the apply channel. The shard's apply
+// consumer reads from this. Raft owns the channel: it creates it here and
+// closes it in Stop after applyLoop has drained (via applyDone).
+func (rn *RaftNode) ApplyCh() <-chan ApplyMsg {
+	return rn.applyCh
+}
