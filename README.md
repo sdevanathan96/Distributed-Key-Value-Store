@@ -46,7 +46,12 @@ When the leader tells a client a write succeeded, the data is already written to
 
 ### Only the leader serves reads, straight from local storage
 
-Reads skip the replication log, which keeps them fast. The trade-off is that reads can be slightly out of date, and if the leader changes between your write and your read, the new leader may not have saved your write yet, so a read there could miss it. Stronger read consistency is a planned addition.
+Reads skip the replication log, which keeps them fast. The trade-off is that a read is not guaranteed to see the latest acknowledged write in two situations:
+
+- A leader cut off from the rest of the cluster keeps answering reads until it notices it has lost contact with a majority and steps down, up to about 350 milliseconds with the default timings.
+- A newly elected leader cannot apply writes left over from its predecessor until it commits a write of its own. Until the next write to that shard arrives, a read there can miss a write that was already acknowledged.
+
+The planned fix is ReadIndex: a new leader commits an empty entry as soon as it takes over, and before each read the leader confirms with a majority that it is still the leader and waits until its storage has caught up.
 
 ### Clients are redirected, never proxied
 
@@ -58,7 +63,15 @@ If a client times out and retries, the same write might be stored twice. Because
 
 ### A node that cannot save its state stops
 
-Before it acts, a node must durably record its Raft state (its term, its vote, and its log). If that disk write fails, the node can no longer participate safely, so it shuts down rather than risk corrupting the agreement among nodes.
+Before it acts, a node must durably record its Raft state (its term, its vote, and its log). If that disk write fails, the node can no longer participate safely, so it shuts down rather than risk corrupting the agreement among nodes. For the same reason, a node whose saved state cannot be read refuses to start: starting blank would let it forget a vote it already cast and vote twice in the same election.
+
+### A node coming back does not disrupt the cluster
+
+A node returning after downtime cannot hear the leader at first, so it times out and wants an election. Left alone it would raise the election term and depose a healthy leader, again and again; the first run of a real three node cluster showed terms jumping from 3 to 40 this way. Three standard Raft extensions prevent it. A node first asks whether it could win before it starts an election (pre-vote). A node that recently heard from a leader refuses to vote for anyone else. And a leader that loses contact with a majority steps down on its own, which also limits how long a cut off leader serves stale reads.
+
+### Restarts never replay old writes
+
+Each write saved to storage carries its position in the replicated log. On restart, storage reports the last position it holds and Raft resumes after it. Reapplying the whole log instead would briefly roll keys back to old values and write every old command to disk a second time.
 
 ### Storage is an LSM tree
 
@@ -140,7 +153,7 @@ internal/
   client/      client library: redirect following and retries
 proto/
   raftpb/      messages nodes use to talk to each other
-  kvpb/         the client API
+  kvpb/        the client API
 cmd/
   node/        the node program
   client/      kvctl, the command line client
@@ -151,13 +164,16 @@ scripts/       cluster-local.sh, a local three node cluster
 
 Each of these is a deliberate choice, not an accident.
 
-- **Reads can be stale.** Reads come from one node's local storage, and there is no guarantee you can read your own write right after a leader change. Stronger consistency is planned.
+- **Reads are not linearizable.** A leader cut off from the cluster can serve old data for up to about 350 milliseconds, and a new leader can miss already acknowledged writes until the next write to that shard. The fix, ReadIndex, is planned.
+- **The log grows forever.** There is no log compaction or snapshotting yet, so the replicated log and the storage write ahead log grow without bound, each change to the Raft state rewrites the whole log to disk, and a node that falls behind catches up by replaying every entry it missed.
 - **No range scans.** You can read a single key, not a range of keys. The storage layer already merges sorted files internally, so a scan would build on that, but it is not exposed yet.
 - **Fixed shard count.** Shards cannot be added or removed on a running cluster, and every node holds every shard. Moving keys between shards and placing shards on a subset of nodes are not built.
-- **Not deployed yet.** Running it in containers and on Kubernetes is the next step.
+- **Not deployed yet.** Running it in containers and on Kubernetes comes after the correctness work below.
 
 ## What's next
 
-- Run it on a local Kubernetes cluster: a container image and the Kubernetes configuration to run a stable three node set.
-- Run it on a cloud Kubernetes cluster, with the infrastructure defined as code.
+- Linearizable reads with ReadIndex, proven by a fault injection harness that drops, delays and partitions traffic between nodes and checks every recorded history with a linearizability checker.
+- Log compaction and snapshots, so the log stops growing and a lagging node catches up from a snapshot.
+- Range scans.
+- Run it on a local Kubernetes cluster, then on a cloud Kubernetes cluster with the infrastructure defined as code.
 - Live resharding and shard placement, but only once the cluster is large enough for it to make a real difference.
