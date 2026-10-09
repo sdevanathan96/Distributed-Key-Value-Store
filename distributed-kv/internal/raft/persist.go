@@ -57,7 +57,9 @@ func (rn *RaftNode) doPersist() error {
 }
 
 // loadPersisted restores term, vote, and log from the state file on disk. A
-// missing file is not an error and leaves the node at its initial state.
+// missing file is not an error and leaves the node at its initial state. A file
+// that cannot be read or parsed, or whose log is not the contiguous run from the
+// index 0 sentinel that every other path assumes, is an error.
 func (rn *RaftNode) loadPersisted() error {
 	statePath := filepath.Join(rn.config.DataDir, "raft-state.json")
 	data, err := os.ReadFile(statePath)
@@ -65,11 +67,19 @@ func (rn *RaftNode) loadPersisted() error {
 		return nil
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("read %s: %w", statePath, err)
 	}
 	var state PersistedState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return err
+		return fmt.Errorf("parse %s: %w", statePath, err)
+	}
+	if len(state.Log) == 0 {
+		return fmt.Errorf("%s: log has no index 0 sentinel", statePath)
+	}
+	for i, entry := range state.Log {
+		if entry.Index != uint64(i) {
+			return fmt.Errorf("%s: log position %d holds index %d", statePath, i, entry.Index)
+		}
 	}
 	rn.currentTerm = state.CurrentTerm
 	rn.votedFor = state.VotedFor

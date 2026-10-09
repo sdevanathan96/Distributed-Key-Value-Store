@@ -95,9 +95,15 @@ func NewRaftNode(config RaftConfig) (*RaftNode, error) {
 	node.electionTimer = time.NewTimer(timeout)
 	node.grpcServer = nil
 	if err := os.MkdirAll(config.DataDir, 0o755); err != nil {
+		node.electionTimer.Stop()
 		return nil, fmt.Errorf("create raft data dir %q: %w", config.DataDir, err)
 	}
-	node.loadPersisted()
+	// Starting blank on a bad state file would forget this node's vote and log,
+	// letting it vote twice in one term. Refuse to start instead.
+	if err := node.loadPersisted(); err != nil {
+		node.electionTimer.Stop()
+		return nil, fmt.Errorf("load raft state: %w", err)
+	}
 	return node, nil
 }
 
