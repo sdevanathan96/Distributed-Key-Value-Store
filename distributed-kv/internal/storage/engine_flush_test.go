@@ -23,7 +23,7 @@ func TestEngineFlush(t *testing.T) {
 	for i := 0; i < numEntries; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		val := []byte(fmt.Sprintf("value-%06d", i))
-		err := engine.Put(key, val)
+		err := engine.Put(key, val, uint64(i+1))
 		require.NoError(t, err)
 	}
 
@@ -57,7 +57,7 @@ func TestEngineCrashDuringFlush(t *testing.T) {
 	for i := 0; i < numEntries; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		val := []byte(fmt.Sprintf("value-%06d", i))
-		require.NoError(t, engine1.Put(key, val))
+		require.NoError(t, engine1.Put(key, val, uint64(i+1)))
 	}
 
 	time.Sleep(500 * time.Millisecond)

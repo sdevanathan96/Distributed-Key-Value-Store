@@ -38,6 +38,12 @@ type RaftConfig struct {
 	ElectionTimeoutMax time.Duration
 	HeartbeatInterval  time.Duration
 	DataDir            string
+	// AppliedIndex is the highest log index the state machine has already
+	// durably applied (storage.Engine.AppliedIndex). A restarted node resumes
+	// applying after it instead of from index 1, so old writes are never
+	// replayed over newer state. Applied implies committed, so commitIndex
+	// starts there too. Zero means apply everything.
+	AppliedIndex uint64
 }
 
 // DefaultConfig returns a RaftConfig for nodeID with the given peer address

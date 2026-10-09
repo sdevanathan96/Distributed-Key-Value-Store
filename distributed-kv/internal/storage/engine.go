@@ -16,6 +16,8 @@ type Engine struct {
 	config    StorageConfig
 	closed    bool
 	lsm       *lsm.LSMTree
+	// appliedIndex is the highest seq written, recovered from the WAL on open.
+	appliedIndex uint64
 }
 
 // NewEngine opens the storage engine at the configured paths, replaying the WAL
@@ -49,19 +51,23 @@ func NewEngine(config StorageConfig) (*Engine, error) {
 		return nil, fmt.Errorf("create lsm: %w", err)
 	}
 	engine := &Engine{
-		config:    config,
-		wal:       wal,
-		memTable:  mem,
-		immutable: nil,
-		closed:    false,
-		lsm:       lsmTree,
+		config:       config,
+		wal:          wal,
+		memTable:     mem,
+		immutable:    nil,
+		closed:       false,
+		lsm:          lsmTree,
+		appliedIndex: wal.MaxSeq(),
 	}
 	return engine, nil
 }
 
 // Put durably records key and value: it appends to the WAL, applies the write
 // to the MemTable, and triggers a background flush when the MemTable is full.
-func (e *Engine) Put(key, value []byte) error {
+// seq is the write's Raft log index (0 for an unsequenced write); it is stored
+// in the same WAL record as the write, so AppliedIndex can never run ahead of
+// or behind the data it describes.
+func (e *Engine) Put(key, value []byte, seq uint64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
@@ -71,11 +77,13 @@ func (e *Engine) Put(key, value []byte) error {
 		Type:  EntryPut,
 		Key:   key,
 		Value: value,
+		Seq:   seq,
 	})
 	if err != nil {
 		return fmt.Errorf("wal append: %w", err)
 	}
 	e.memTable.Put(key, value)
+	e.advanceApplied(seq)
 	if e.memTable.ShouldFlush() {
 		log.Printf("MemTable full (%d bytes), flushing..", e.memTable.size)
 		e.triggerFlush()
@@ -122,8 +130,8 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 }
 
 // Delete durably records a tombstone for key through the same WAL then MemTable
-// path as Put.
-func (e *Engine) Delete(key []byte) error {
+// path as Put, with the same seq semantics.
+func (e *Engine) Delete(key []byte, seq uint64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
@@ -133,16 +141,38 @@ func (e *Engine) Delete(key []byte) error {
 		Type:  EntryDelete,
 		Key:   key,
 		Value: nil,
+		Seq:   seq,
 	})
 	if err != nil {
 		return fmt.Errorf("wal append: %w", err)
 	}
 	e.memTable.Delete(key)
+	e.advanceApplied(seq)
 	if e.memTable.ShouldFlush() {
 		log.Printf("MemTable full (%d bytes), flush needed", e.memTable.size)
 		e.triggerFlush()
 	}
 	return nil
+}
+
+// AppliedIndex returns the highest seq durably written, including writes
+// recovered from the WAL. Raft resumes applying after it on restart, so a
+// restart never replays old writes over newer state.
+//
+// It is recovered from the WAL, which holds every record because nothing
+// deletes segment files. Deleting segments after a flush (snapshots, Phase 2
+// Stage 3) must first record the flushed seq somewhere that survives.
+func (e *Engine) AppliedIndex() uint64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.appliedIndex
+}
+
+// advanceApplied raises appliedIndex to seq. The caller must hold e.mu.
+func (e *Engine) advanceApplied(seq uint64) {
+	if seq > e.appliedIndex {
+		e.appliedIndex = seq
+	}
 }
 
 // Close marks the engine closed, waits for background flushes to finish, and

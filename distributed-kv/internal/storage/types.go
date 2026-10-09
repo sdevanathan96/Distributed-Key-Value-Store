@@ -35,8 +35,12 @@ type WALEntry struct {
 	Key   []byte
 	Value []byte
 	Type  EntryType
+	// Index is the WAL's own record number, used by the truncation watermark.
 	Index uint64
-	Term  uint64
+	// Seq is the Raft log index of the write, 0 for an unsequenced write. It
+	// occupies the record slot that held an always zero term, so older WAL
+	// files decode with Seq 0.
+	Seq uint64
 }
 
 type Command struct {

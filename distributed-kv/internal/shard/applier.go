@@ -38,9 +38,9 @@ func (sh *Shard) consumeApply(applyCh <-chan raft.ApplyMsg) {
 		var applyErr error
 		switch cmd.Op {
 		case raftpb.Op_OP_PUT:
-			applyErr = sh.engine.Put(cmd.Key, cmd.Value)
+			applyErr = sh.engine.Put(cmd.Key, cmd.Value, msg.CommandIndex)
 		case raftpb.Op_OP_DELETE:
-			applyErr = sh.engine.Delete(cmd.Key)
+			applyErr = sh.engine.Delete(cmd.Key, msg.CommandIndex)
 		default:
 			applyErr = fmt.Errorf("unknown op: %v", cmd.Op)
 			log.Printf("shard %d: %v", sh.ID, applyErr)

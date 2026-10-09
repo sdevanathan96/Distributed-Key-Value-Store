@@ -104,6 +104,16 @@ func NewRaftNode(config RaftConfig) (*RaftNode, error) {
 		node.electionTimer.Stop()
 		return nil, fmt.Errorf("load raft state: %w", err)
 	}
+	// The state machine can only have applied entries this node already held
+	// in its log, so an applied index past the end means the raft and storage
+	// directories do not belong together.
+	lastIndex, _ := node.getLastLogInfo()
+	if config.AppliedIndex > lastIndex {
+		node.electionTimer.Stop()
+		return nil, fmt.Errorf("state machine applied index %d is past the last raft log index %d", config.AppliedIndex, lastIndex)
+	}
+	node.lastApplied = config.AppliedIndex
+	node.commitIndex = config.AppliedIndex
 	return node, nil
 }
 

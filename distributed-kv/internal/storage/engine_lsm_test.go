@@ -21,7 +21,7 @@ func TestEngineGetAfterFlush(t *testing.T) {
 	for i := 0; i < numEntries; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		val := []byte(fmt.Sprintf("value-%06d", i))
-		require.NoError(t, engine.Put(key, val))
+		require.NoError(t, engine.Put(key, val, uint64(i+1)))
 	}
 
 	time.Sleep(1 * time.Second)
@@ -48,14 +48,14 @@ func TestEngineGetAfterFlushWithDeletes(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		val := []byte(fmt.Sprintf("value-%06d", i))
-		require.NoError(t, engine.Put(key, val))
+		require.NoError(t, engine.Put(key, val, uint64(i+1)))
 	}
 
 	engine.WaitForBackground()
 
 	for i := 0; i < 100; i += 2 {
 		key := []byte(fmt.Sprintf("key-%06d", i))
-		require.NoError(t, engine.Delete(key))
+		require.NoError(t, engine.Delete(key, uint64(101+i)))
 	}
 
 	engine.WaitForBackground()
@@ -88,7 +88,7 @@ func TestEngineRecoveryWithSSTables(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		val := []byte(fmt.Sprintf("value-%06d", i))
-		require.NoError(t, engine1.Put(key, val))
+		require.NoError(t, engine1.Put(key, val, uint64(i+1)))
 	}
 
 	time.Sleep(500 * time.Millisecond)
@@ -96,7 +96,7 @@ func TestEngineRecoveryWithSSTables(t *testing.T) {
 	for i := 100; i < 120; i++ {
 		key := []byte(fmt.Sprintf("key-%06d", i))
 		val := []byte(fmt.Sprintf("value-%06d", i))
-		require.NoError(t, engine1.Put(key, val))
+		require.NoError(t, engine1.Put(key, val, uint64(i+1)))
 	}
 
 	engine1.Close()
@@ -124,7 +124,7 @@ func TestEngineOverwriteAcrossFlushes(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		val := []byte(fmt.Sprintf("version-%d", i))
-		require.NoError(t, engine.Put([]byte("counter"), val))
+		require.NoError(t, engine.Put([]byte("counter"), val, uint64(i+1)))
 	}
 
 	time.Sleep(1 * time.Second)

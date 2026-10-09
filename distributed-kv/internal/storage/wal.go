@@ -17,6 +17,7 @@ type WAL struct {
 	file            *os.File
 	dir             string
 	nextIndex       uint64
+	maxSeq          uint64 // highest Seq seen by Recover
 	size            int64
 	segmentNum      uint64
 	truncatedBefore uint64
@@ -107,7 +108,7 @@ func (w *WAL) Append(entry WALEntry) (uint64, error) {
 	payloadSize := 8 + 8 + 1 + 2 + len(entry.Key) + len(entry.Value)
 	payload := make([]byte, payloadSize)
 	offset := 0
-	binary.BigEndian.PutUint64(payload[offset:], entry.Term)
+	binary.BigEndian.PutUint64(payload[offset:], entry.Seq)
 	offset += 8
 	binary.BigEndian.PutUint64(payload[offset:], entry.Index)
 	offset += 8
@@ -183,6 +184,11 @@ func (w *WAL) Recover() ([]WALEntry, error) {
 				break
 			}
 			entry := decodePayload(payload)
+			// Count records below the watermark too: Truncate keeps the
+			// segment files, so the newest applied Seq survives it.
+			if entry.Seq > w.maxSeq {
+				w.maxSeq = entry.Seq
+			}
 			if entry.Index <= w.truncatedBefore {
 				continue
 			}
@@ -201,13 +207,18 @@ func (w *WAL) Recover() ([]WALEntry, error) {
 	return entries, err
 }
 
+// MaxSeq returns the highest Seq among the records Recover read.
+func (w *WAL) MaxSeq() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.maxSeq
+}
+
 // decodePayload parses a WAL record payload into a WALEntry.
 func decodePayload(payload []byte) WALEntry {
 	entry := WALEntry{}
-	term := binary.BigEndian.Uint64(payload[0:8])
-	index := binary.BigEndian.Uint64(payload[8:16])
-	entry.Term = term
-	entry.Index = index
+	entry.Seq = binary.BigEndian.Uint64(payload[0:8])
+	entry.Index = binary.BigEndian.Uint64(payload[8:16])
 	entry.Type = EntryType(payload[16])
 	keyLen := binary.BigEndian.Uint16(payload[17:19])
 	entry.Key = make([]byte, keyLen)

@@ -52,6 +52,7 @@ func NewShard(cfg Config) (*Shard, error) {
 	rcfg := cfg.RaftConfig
 	rcfg.DataDir = filepath.Join(cfg.DataDir, "raft")
 	rcfg.ShardID = uint32(cfg.ID)
+	rcfg.AppliedIndex = engine.AppliedIndex()
 	rn, err := raft.NewRaftNode(rcfg)
 	if err != nil {
 		engine.Close()
