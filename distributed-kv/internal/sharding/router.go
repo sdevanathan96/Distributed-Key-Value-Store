@@ -1,8 +1,9 @@
 package sharding
 
-// Router maps a key to a shard ID. The MVP implementation is single shard
-// (always returns 0). A consistent hash ring will implement this same
-// interface when multi shard lands, so the Server does not change.
+// Router maps a key to a shard ID. Contract: ShardFor always returns a value in
+// [0, NumShards()), and the same key always maps to the same shard. The Server
+// checks at construction that it holds exactly NumShards() shards ordered by
+// ID, so a shard ID doubles as a slice index.
 type Router interface {
 	ShardFor(key []byte) int
 	NumShards() int

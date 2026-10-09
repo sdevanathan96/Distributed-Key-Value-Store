@@ -28,7 +28,11 @@ func (s NodeState) String() string {
 }
 
 type RaftConfig struct {
-	NodeID             string
+	NodeID string
+	// ShardID names the Raft group this node belongs to. It is stamped on every
+	// outgoing RPC, and incoming RPCs for any other shard are rejected, so two
+	// groups sharing a Raft port can never feed entries into each other's log.
+	ShardID            uint32
 	Peers              map[string]string
 	ElectionTimeoutMin time.Duration
 	ElectionTimeoutMax time.Duration

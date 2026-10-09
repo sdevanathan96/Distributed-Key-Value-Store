@@ -16,9 +16,9 @@ import (
 
 // Shard is one independent unit of consensus and storage. Each shard owns one
 // RaftNode and one Engine. Raft owns the apply channel; the shard reads from
-// it via raft.ApplyCh(). In a multi shard deployment the Server holds N shards
-// and routes by key via a sharding.Router. With one shard the router returns 0
-// for every key.
+// it via raft.ApplyCh(). A process hosts N shards; the Server routes each key
+// to one of them via a sharding.Router, and each shard's RaftNode forms its own
+// Raft group with the same shard on the other nodes.
 type Shard struct {
 	ID        int
 	raft      *raft.RaftNode
@@ -40,6 +40,9 @@ type Config struct {
 // paths are derived from cfg.DataDir for per shard isolation. The apply
 // channel is created and owned by the RaftNode, not here.
 func NewShard(cfg Config) (*Shard, error) {
+	if cfg.ID < 0 {
+		return nil, fmt.Errorf("shard id must be non negative, got %d", cfg.ID)
+	}
 	storageCfg := storage.DefaultConfig(filepath.Join(cfg.DataDir, "storage"))
 	engine, err := storage.NewEngine(storageCfg)
 	if err != nil {
@@ -48,6 +51,7 @@ func NewShard(cfg Config) (*Shard, error) {
 
 	rcfg := cfg.RaftConfig
 	rcfg.DataDir = filepath.Join(cfg.DataDir, "raft")
+	rcfg.ShardID = uint32(cfg.ID)
 	rn, err := raft.NewRaftNode(rcfg)
 	if err != nil {
 		engine.Close()
@@ -139,6 +143,8 @@ func (sh *Shard) Status() raft.Status {
 	return sh.raft.Status()
 }
 
-func (sh *Shard) StartRaftServer(addr string) error {
-	return sh.raft.StartGRPCServer(addr)
+// RaftNode exposes the node so the Server can register it with the process
+// wide raft.Mux. Nothing else should reach through the shard to raft.
+func (sh *Shard) RaftNode() *raft.RaftNode {
+	return sh.raft
 }

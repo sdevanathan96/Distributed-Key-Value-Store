@@ -56,14 +56,40 @@ func TestServerRouting(t *testing.T) {
 		fn:        func(k []byte) int { return len(k) % 2 },
 	}
 
-	s := NewServer([]*shard.Shard{sh0, sh1}, router)
+	s, err := NewServer([]*shard.Shard{sh0, sh1}, router)
+	require.NoError(t, err)
 	assert.Same(t, sh0, s.ShardFor([]byte("ab")))
 	assert.Same(t, sh1, s.ShardFor([]byte("abc")))
 }
 
 func TestServerRoutingSingleShard(t *testing.T) {
 	sh0 := mustNewShard(t, 0)
-	s := NewServer([]*shard.Shard{sh0}, sharding.SingleShardRouter{})
+	s, err := NewServer([]*shard.Shard{sh0}, sharding.SingleShardRouter{})
+	require.NoError(t, err)
 	assert.Same(t, sh0, s.ShardFor([]byte("anything")))
 	assert.Same(t, sh0, s.ShardFor([]byte("")))
+}
+
+func TestNewServerRejectsNoShards(t *testing.T) {
+	_, err := NewServer(nil, sharding.SingleShardRouter{})
+	assert.Error(t, err)
+}
+
+// A router that can return an index past the end of the slice would panic
+// inside a gRPC handler and kill the node, so the count must match up front.
+func TestNewServerRejectsShardCountMismatch(t *testing.T) {
+	sh0 := mustNewShard(t, 0)
+	router := fakeRouter{numShards: 2, fn: func([]byte) int { return 1 }}
+	_, err := NewServer([]*shard.Shard{sh0}, router)
+	assert.Error(t, err)
+}
+
+// ShardFor uses the router's shard ID as a slice index. Shards passed out of
+// ID order would route keys into the wrong Raft group with no error at all.
+func TestNewServerRejectsShardsOutOfOrder(t *testing.T) {
+	sh0 := mustNewShard(t, 0)
+	sh1 := mustNewShard(t, 1)
+	router := fakeRouter{numShards: 2, fn: func(k []byte) int { return len(k) % 2 }}
+	_, err := NewServer([]*shard.Shard{sh1, sh0}, router)
+	assert.Error(t, err)
 }

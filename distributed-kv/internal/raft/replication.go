@@ -44,6 +44,7 @@ func (rn *RaftNode) replicateToFollower(peerID string, client raftpb.RaftService
 		PrevLogTerm:  prevLogTerm,
 		Entries:      entries,
 		LeaderCommit: leaderCommit,
+		ShardId:      rn.config.ShardID,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

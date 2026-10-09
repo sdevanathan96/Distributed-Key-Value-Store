@@ -6,6 +6,8 @@ import (
 	"net"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type raftServer struct {
@@ -13,10 +15,22 @@ type raftServer struct {
 	node *RaftNode
 }
 
+// checkShard rejects an RPC addressed to a different Raft group. Without it, a
+// misrouted AppendEntries would splice another shard's entries into this log.
+func (s *raftServer) checkShard(shardID uint32) error {
+	if shardID != s.node.config.ShardID {
+		return status.Errorf(codes.NotFound, "shard %d is not served here (this node serves shard %d)", shardID, s.node.config.ShardID)
+	}
+	return nil
+}
+
 // RequestVote handles an incoming RequestVote RPC, granting the vote only if
 // the candidate's term is current and its log is at least as up to date as this
 // node's.
 func (s *raftServer) RequestVote(ctx context.Context, req *raftpb.VoteRequest) (*raftpb.VoteResponse, error) {
+	if err := s.checkShard(req.ShardId); err != nil {
+		return nil, err
+	}
 	s.node.mu.Lock()
 	defer s.node.mu.Unlock()
 	resp := &raftpb.VoteResponse{
@@ -54,6 +68,9 @@ func (s *raftServer) RequestVote(ctx context.Context, req *raftpb.VoteRequest) (
 // InstallSnapshot handles an incoming InstallSnapshot RPC. It is currently a
 // stub that only reports the node's term.
 func (s *raftServer) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnapshotRequest) (*raftpb.InstallSnapshotResponse, error) {
+	if err := s.checkShard(req.ShardId); err != nil {
+		return nil, err
+	}
 	resp := &raftpb.InstallSnapshotResponse{
 		Term: s.node.currentTerm,
 	}
@@ -78,7 +95,9 @@ func (rn *RaftNode) StartGRPCServer(address string) error {
 // PrevLogIndex, appends or overwrites the carried entries, and advances the
 // commit index from LeaderCommit.
 func (s *raftServer) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesRequest) (*raftpb.AppendEntriesResponse, error) {
-
+	if err := s.checkShard(req.ShardId); err != nil {
+		return nil, err
+	}
 	s.node.mu.Lock()
 	defer s.node.mu.Unlock()
 	logChanged := false

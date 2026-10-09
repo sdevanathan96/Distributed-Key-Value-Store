@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"time"
 
@@ -92,13 +93,24 @@ func (a *KVAPI) Get(ctx context.Context, req *kvpb.GetRequest) (*kvpb.GetRespons
 	return &kvpb.GetResponse{Value: val, Found: true}, nil
 }
 
+// ClusterStatus reports every shard as this node sees it. Any node answers;
+// there is no leader check because each shard has its own leader.
 func (a *KVAPI) ClusterStatus(ctx context.Context, req *kvpb.ClusterStatusRequest) (*kvpb.ClusterStatusResponse, error) {
-	st := a.server.shards[0].Status()
-	return &kvpb.ClusterStatusResponse{
-		LeaderId: st.LeaderID,
-		Nodes:    st.Nodes,
-		Term:     st.Term,
-	}, nil
+	resp := &kvpb.ClusterStatusResponse{
+		Shards: make([]*kvpb.ShardStatus, 0, len(a.server.shards)),
+	}
+	for _, sh := range a.server.shards {
+		st := sh.Status()
+		sort.Strings(st.Nodes) // Status builds it from a map; sort so every node prints the same list
+		resp.NodeId = st.NodeID
+		resp.Shards = append(resp.Shards, &kvpb.ShardStatus{
+			ShardId:  uint32(sh.ID),
+			LeaderId: st.LeaderID,
+			Nodes:    st.Nodes,
+			Term:     st.Term,
+		})
+	}
+	return resp, nil
 }
 
 // requireLeader returns nil if the shard is the leader, otherwise a redirect

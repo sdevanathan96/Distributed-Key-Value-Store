@@ -106,11 +106,13 @@ func TestKVEndToEndThreeNodeRedirect(t *testing.T) {
 	}
 
 	for _, nd := range nodes {
-		require.NoError(t, nd.sh.StartRaftServer(nd.raftAddr))
+		srv, err := NewServer([]*shard.Shard{nd.sh}, sharding.SingleShardRouter{})
+		require.NoError(t, err)
+		nd.srv = srv
+		require.NoError(t, nd.srv.StartRaftServer(nd.raftAddr))
 	}
 
 	for _, nd := range nodes {
-		nd.srv = NewServer([]*shard.Shard{nd.sh}, sharding.SingleShardRouter{})
 		nd.srv.Start()
 
 		kv, err := NewKVServer(nd.srv, nd.clientAddr)

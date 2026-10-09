@@ -28,6 +28,7 @@ func (rn *RaftNode) startElection() {
 		CandidateId:  rn.id,
 		LastLogIndex: lastIndex,
 		LastLogTerm:  lastTerm,
+		ShardId:      rn.config.ShardID,
 	}
 	votesNeeded := (len(rn.peers)+1)/2 + 1
 	var votesReceived atomic.Int32

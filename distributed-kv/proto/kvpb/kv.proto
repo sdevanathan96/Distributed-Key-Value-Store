@@ -26,10 +26,19 @@ message DeleteResponse {
 }
 
 message ClusterStatusRequest {}
+// One entry per shard: each shard is its own Raft group with its own leader
+// and term.
 message ClusterStatusResponse {
-    string leader_id = 1;
-    repeated string nodes = 2;
-    uint64 term = 3;
+    reserved 1, 2, 3; // single shard leader_id, nodes, term
+    string node_id = 4; // the node that answered
+    repeated ShardStatus shards = 5;
+}
+
+message ShardStatus {
+    uint32 shard_id = 1;
+    string leader_id = 2;
+    repeated string nodes = 3;
+    uint64 term = 4;
 }
 
 message LeaderHint {

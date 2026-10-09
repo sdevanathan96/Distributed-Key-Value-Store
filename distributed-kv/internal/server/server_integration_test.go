@@ -60,9 +60,9 @@ func TestKVEndToEndSingleNode(t *testing.T) {
 	sh, err := shard.NewShard(cfg)
 	require.NoError(t, err)
 
-	require.NoError(t, sh.StartRaftServer(raftAddr))
-
-	srv := NewServer([]*shard.Shard{sh}, sharding.SingleShardRouter{})
+	srv, err := NewServer([]*shard.Shard{sh}, sharding.SingleShardRouter{})
+	require.NoError(t, err)
+	require.NoError(t, srv.StartRaftServer(raftAddr))
 	srv.Start()
 	kv, err := NewKVServer(srv, clientAddr)
 	require.NoError(t, err)
