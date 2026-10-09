@@ -13,21 +13,42 @@ Keys are split across a fixed number of shards by a consistent hash ring. Each s
 
 ## How it works
 
-A node is one process. A three node cluster is three processes. For each shard, the three nodes elect a leader for that shard and keep their copies of its data in sync, so different shards can have leaders on different nodes.
+A node is one process. A three node cluster is three processes, and every node holds a copy of every shard.
 
 ```
-  client  (gRPC: set / read / delete / status)
-     |
-     v
-  +------------------------------------------------------+
-  | one node (one process)                               |
-  |                                                      |
-  |   gRPC API on the client port                        |
-  |     routes the key to a shard                        |
-  |       shard: handles the request                     |
-  |         Raft  <-- talks to peer nodes -->  other nodes
-  |         storage (LSM tree on disk)                   |
-  +------------------------------------------------------+
+               node-0         node-1         node-2
+            +----------+   +----------+   +----------+
+  shard 0   | follower |---|  leader  |---| follower |   Raft group 0
+  shard 1   |  leader  |---| follower |---| follower |   Raft group 1
+  shard 2   | follower |---| follower |---|  leader  |   Raft group 2
+            +----------+   +----------+   +----------+
+```
+
+Each row is one Raft group: the three copies of one shard, kept in sync by Raft. Each group elects its own leader, so different shards can be led by different nodes (the placement above is one example). Inside a node, a request takes this path:
+
+```
+                        client
+                          |   put / get / delete / status (gRPC)
+                          v
++--------------------- one node (one process) ---------------------+
+|                                                                  |
+|  KV API on the client port (Raft port + 1)                       |
+|    the hash ring picks the key's shard; if this node does not    |
+|    lead that shard, it replies with the leader's address         |
+|                         |                                        |
+|                         v                                        |
+|     +-----------+  +-----------+  +-----------+                  |
+|     |  shard 0  |  |  shard 1  |  |  shard 2  |   N = --shards   |
+|     |   Raft    |  |   Raft    |  |   Raft    |                  |
+|     |  storage  |  |  storage  |  |  storage  |   LSM on disk    |
+|     +-----+-----+  +-----+-----+  +-----+-----+                  |
+|           |              |              |                        |
+|  Raft port: shared by every shard; each message names its shard  |
+|                                                                  |
++-------------------------+----------------------------------------+
+                          |
+                          v
+            the same shards on the other nodes
 ```
 
 Each node listens on two ports: one for talking to peer nodes, and one for the client API. By convention the client port is the peer port plus one. All of a node's shards share the peer port; every message between nodes names its shard.
