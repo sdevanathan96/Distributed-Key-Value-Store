@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -41,6 +42,15 @@ type RaftNode struct {
 	fatalCh       chan error
 	grpcServer    *grpc.Server
 	peerConns     []*grpc.ClientConn
+	// lastLeaderContact is when a follower last heard from its current leader.
+	// While it is recent, higher term vote requests are ignored.
+	lastLeaderContact time.Time
+	// peerContact is when a leader last got a response from each peer, for
+	// CheckQuorum. Reset in becomeLeader.
+	peerContact map[string]time.Time
+	// preVoteRound invalidates responses that arrive after a newer pre-vote
+	// round has started.
+	preVoteRound uint64
 }
 
 type Status struct {
@@ -141,7 +151,21 @@ func (rn *RaftNode) LeaderHint() (addr string, known bool) {
 // loop and the apply loop. It must be called once after NewRaftNode.
 func (rn *RaftNode) Start() {
 	for peerId, addr := range rn.config.Peers {
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(addr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			// gRPC's default reconnect backoff grows to 120s. A peer that was
+			// down for a while would then stay unreachable for that long after
+			// it restarts, and miss every heartbeat in between. Cap it at 1s.
+			grpc.WithConnectParams(grpc.ConnectParams{
+				Backoff: backoff.Config{
+					BaseDelay:  100 * time.Millisecond,
+					Multiplier: 1.6,
+					Jitter:     0.2,
+					MaxDelay:   time.Second,
+				},
+				MinConnectTimeout: time.Second,
+			}),
+		)
 		if err != nil {
 			log.Printf("%s: failed to connect to peer %s at %s", rn.id, peerId, addr)
 			continue
@@ -189,7 +213,7 @@ func (rn *RaftNode) run() {
 		case <-rn.electionTimer.C:
 			rn.mu.Lock()
 			if rn.state != Leader {
-				rn.startElection()
+				rn.startPreVote()
 			}
 			rn.mu.Unlock()
 
@@ -236,13 +260,61 @@ func (rn *RaftNode) becomeLeader() {
 	rn.state = Leader
 	rn.leaderId = rn.id
 	lastIndex, _ := rn.getLastLogInfo()
+	// Every peer starts with fresh contact: a new leader gets one CheckQuorum
+	// window to hear from a majority before it steps down.
+	now := time.Now()
+	rn.peerContact = make(map[string]time.Time, len(rn.peers))
 	for peerId := range rn.peers {
 		rn.nextIndex[peerId] = lastIndex + 1
 		rn.matchIndex[peerId] = 0
+		rn.peerContact[peerId] = now
 	}
 	rn.electionTimer.Stop()
 	rn.sendHeartbeats()
 	rn.startHeartbeatTimer()
+}
+
+// stepDown turns a leader that lost contact with a majority into a follower in
+// the same term (CheckQuorum). Unlike becomeFollower it keeps votedFor: this
+// node voted for itself in this term, and forgetting that would let it vote a
+// second time in the same term. Term and vote are unchanged, so nothing is
+// persisted. The caller must hold rn.mu.
+func (rn *RaftNode) stepDown() {
+	rn.state = Follower
+	rn.leaderId = ""
+	rn.stopHeartbeatTimer()
+	rn.resetElectionTimer()
+}
+
+// hasLiveLeader reports whether this node believes a leader is currently in
+// charge: it is the leader (CheckQuorum steps it down once it loses a
+// majority), or it is a follower that heard from its leader within the
+// minimum election timeout. While true, the node refuses pre-votes and
+// ignores higher term vote requests (Raft thesis 4.2.3). The caller must hold
+// rn.mu.
+func (rn *RaftNode) hasLiveLeader() bool {
+	switch rn.state {
+	case Leader:
+		return true
+	case Follower:
+		return rn.leaderId != "" && time.Since(rn.lastLeaderContact) < rn.config.ElectionTimeoutMin
+	default:
+		return false
+	}
+}
+
+// hasQuorumContact reports whether a majority (counting this node) responded
+// within the maximum election timeout. A leader that fails this has most
+// likely been partitioned away, and followers on the other side may already
+// have elected someone else. The caller must hold rn.mu.
+func (rn *RaftNode) hasQuorumContact() bool {
+	count := 1
+	for peerID := range rn.peers {
+		if time.Since(rn.peerContact[peerID]) < rn.config.ElectionTimeoutMax {
+			count++
+		}
+	}
+	return count >= (len(rn.peers)+1)/2+1
 }
 
 // Propose appends command to the leader's log and triggers replication,

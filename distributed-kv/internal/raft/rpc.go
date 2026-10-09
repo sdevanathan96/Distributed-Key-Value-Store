@@ -4,6 +4,7 @@ import (
 	"context"
 	"distributed-kv/proto/raftpb"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -33,11 +34,20 @@ func (s *raftServer) RequestVote(ctx context.Context, req *raftpb.VoteRequest) (
 	}
 	s.node.mu.Lock()
 	defer s.node.mu.Unlock()
+	if req.PreVote {
+		return s.node.preVoteResponse(req), nil
+	}
 	resp := &raftpb.VoteResponse{
 		Term:        s.node.currentTerm,
 		VoteGranted: false,
 	}
 	if req.Term < s.node.currentTerm {
+		return resp, nil
+	}
+	// A higher term request while a leader is live comes from a node that
+	// cannot hear that leader, typically one that just restarted. Adopting its
+	// term would depose a healthy leader, so ignore it (Raft thesis 4.2.3).
+	if req.Term > s.node.currentTerm && s.node.hasLiveLeader() {
 		return resp, nil
 	}
 
@@ -118,6 +128,7 @@ func (s *raftServer) AppendEntries(ctx context.Context, req *raftpb.AppendEntrie
 		s.node.state = Follower
 	}
 	s.node.leaderId = req.LeaderId
+	s.node.lastLeaderContact = time.Now()
 	s.node.resetElectionTimer()
 	resp.Term = s.node.currentTerm
 	if req.PrevLogIndex >= uint64(len(s.node.log)) {

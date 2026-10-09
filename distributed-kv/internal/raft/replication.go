@@ -58,6 +58,9 @@ func (rn *RaftNode) replicateToFollower(peerID string, client raftpb.RaftService
 	if rn.currentTerm != currentTerm || rn.state != Leader {
 		return
 	}
+	if rn.peerContact != nil {
+		rn.peerContact[peerID] = time.Now()
+	}
 
 	if resp.Term > rn.currentTerm {
 		rn.becomeFollower(resp.Term)

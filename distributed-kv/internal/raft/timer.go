@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"log"
 	"math/rand"
 	"time"
 )
@@ -40,7 +41,13 @@ func (rn *RaftNode) startHeartbeatTimer() {
 			case <-ticker.C:
 				rn.mu.Lock()
 				if rn.state == Leader {
-					rn.sendHeartbeats()
+					if rn.hasQuorumContact() {
+						rn.sendHeartbeats()
+					} else {
+						log.Printf("%s: shard %d: no response from a majority in %v, stepping down",
+							rn.id, rn.config.ShardID, rn.config.ElectionTimeoutMax)
+						rn.stepDown()
+					}
 				}
 				rn.mu.Unlock()
 			case <-stop:
